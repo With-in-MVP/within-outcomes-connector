@@ -17,6 +17,9 @@ jobs:
       - name: Smoke-parse the bridge (no deps to install)
         run: node --check src/bridge.mjs
 
+      - name: Compute lowercase image name (Docker requires lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -30,15 +33,15 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless)
-        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
 
       - name: Print pinnable reference
         run: |
           echo "Pin this exact release:"
-          echo "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+          echo "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
