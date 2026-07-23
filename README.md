@@ -25,6 +25,18 @@ The pseudonymous ID is computed with the **same function your Within SDK uses** 
 MCP server, so your usage telemetry and CRM outcomes join automatically — without either
 system ever sharing a raw identifier.
 
+## Adapters
+
+| `CRM=` | Source | Dependencies |
+|---|---|---|
+| `salesforce` (default) | Connected App + SOQL | none — Node built-ins only |
+| `postgres` | a billing table or sanitized view in your own database | `pg` (the bridge's one dependency, loaded only for this adapter) |
+
+The Postgres adapter fits Stripe-webhook → Postgres billing stacks: point it at
+your subscriptions table (field mapping) or hand it a query returning
+`raw_id, outcome, outcome_at, plan` (the sanitized-view pattern). Use a
+read-only database user.
+
 ## Setup (~1 hour, no code)
 
 1. **Register an API app in your CRM.** Salesforce: a Connected App (or External
@@ -49,8 +61,9 @@ both you and Within can see the bridge is alive.
 
 ## Auditing & trust
 
-- **Read it**: the entire data path is [`src/bridge.mjs`](src/bridge.mjs) — ~200 lines,
-  zero third-party dependencies. Only Node.js built-ins touch your data.
+- **Read it**: the entire data path is [`src/`](src/) — ~300 lines across the core
+  and adapters. One third-party dependency total (`pg`, used only by the
+  postgres adapter); the Salesforce path is Node built-ins only.
 - **Verify it**: every release is signed (Sigstore keyless). Verify with
   `cosign verify ghcr.io/with-in/privacy-bridge@<digest>`.
 - **Pin it**: deploy by digest (`@sha256:…`), not by tag — the image you audited is
