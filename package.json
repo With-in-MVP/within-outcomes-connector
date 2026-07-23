@@ -5,7 +5,9 @@
   "description": "Runs in the vendor's environment: pulls CRM/database outcomes, pseudonymizes identifiers locally, pushes only pseudonymous events to Within.",
   "scripts": {
     "start": "node src/bridge.mjs",
-    "check": "node --check src/bridge.mjs && node --check src/adapters/salesforce.mjs && node --check src/adapters/postgres.mjs"
+    "check": "node --check src/bridge.mjs && node --check src/lib.mjs && node --check src/adapters/salesforce.mjs && node --check src/adapters/postgres.mjs",
+    "test": "node --test 'test/**/*.test.mjs'",
+    "test:integration": "docker compose -f test/integration/docker-compose.yml up -d --wait && node --test 'test/integration/*.test.mjs'; docker compose -f test/integration/docker-compose.yml down -v"
   },
   "dependencies": {
     "pg": "^8.13.0"

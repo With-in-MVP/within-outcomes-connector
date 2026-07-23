@@ -16,9 +16,9 @@
 // Usage:  node src/bridge.mjs [--dry-run]
 // Config: environment variables — see config.example.env
 
-import { createHash, createHmac } from 'node:crypto';
 import { salesforceConfig, salesforceRows } from './adapters/salesforce.mjs';
 import { postgresConfig, postgresRows } from './adapters/postgres.mjs';
+import { ID_NORMALIZE_MODES, toOutcomeEvent, buildConversionPayload } from './lib.mjs';
 
 // ── configuration ─────────────────────────────────────────────────────────
 
@@ -38,7 +38,14 @@ const CONFIG = {
     // v2 — vendor-held HMAC secret; requires matching SDK support. Leave unset.
     hashSecret: process.env.HASH_SECRET || null,
     lookbackDays: Number(env('LOOKBACK_DAYS', '7')),
+    // Must mirror what the vendor's identify() does to the same identifier
+    // before the SDK hashes it: 'lowercase' (default; emails) or 'none'
+    // (case-sensitive account IDs — the SDK itself never lowercases).
+    idNormalize: env('ID_NORMALIZE', 'lowercase').toLowerCase(),
 };
+if (!ID_NORMALIZE_MODES.includes(CONFIG.idNormalize)) {
+    throw new Error(`invalid ID_NORMALIZE: ${CONFIG.idNormalize} (supported: ${ID_NORMALIZE_MODES.join(', ')})`);
+}
 
 const ADAPTERS = {
     salesforce: () => {
@@ -54,42 +61,14 @@ if (!ADAPTERS[CRM]) throw new Error(`unknown CRM adapter: ${CRM} (supported: ${O
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
-// ── pseudonymization (identical construction to the Within SDK) ───────────
-
-function hashSubject(vendorSlug, subject, secret = null) {
-    const message = `subject:${vendorSlug.trim().toLowerCase()}:${subject.trim()}`;
-    return secret
-        ? createHmac('sha256', secret).update(message).digest('hex')
-        : createHash('sha256').update(message).digest('hex');
-}
-
-// ── transform: the privacy boundary. Raw identifiers do not survive this. ─
-
-function toOutcomeEvent(row) {
-    const outcomeValue = String(row.outcome ?? '').toLowerCase();
-    return {
-        kind: CONFIG.outcomeMap[outcomeValue] ?? 'skip',
-        subject: hashSubject(CONFIG.vendorSlug, String(row.rawId).toLowerCase(), CONFIG.hashSecret),
-        outcome: outcomeValue,
-        outcome_at: row.outcomeAt ?? null,
-        plan: row.plan ?? null,
-    };
-}
-
 // ── load: push through Within's ingestion API ─────────────────────────────
+// (pseudonymization + transform live in lib.mjs — the privacy boundary)
 
 async function pushConversion(evt) {
     const res = await fetch(`${CONFIG.withinBaseUrl}/api/sdk/conversions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ingestKey}` },
-        body: JSON.stringify({
-            vendor_slug: CONFIG.vendorSlug,
-            subject: evt.subject,
-            converted_at: evt.outcome_at ? `${evt.outcome_at}T00:00:00.000Z` : undefined,
-            conversion_utc_date: evt.outcome_at ?? undefined,
-            plan: evt.plan ? { id: evt.plan, name: evt.plan } : undefined,
-            metadata: { source: 'within-privacy-bridge', outcome: evt.outcome },
-        }),
+        body: JSON.stringify(buildConversionPayload(evt, CONFIG)),
     });
     const body = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, inserted: body.inserted ?? null, body };
@@ -125,7 +104,7 @@ const startedAt = Date.now();
 for await (const row of ADAPTERS[CRM]()) {
     stats.scanned++;
     if (row.rawId == null || row.rawId === '') { stats.unmapped_skipped++; continue; }
-    const evt = toOutcomeEvent(row);
+    const evt = toOutcomeEvent(row, CONFIG);
 
     if (evt.kind === 'churn') { stats.churn_skipped++; continue; }     // pending churn ingestion
     if (evt.kind !== 'conversion') { stats.unmapped_skipped++; continue; }

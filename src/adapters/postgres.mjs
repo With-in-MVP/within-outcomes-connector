@@ -43,35 +43,50 @@ function ident(name, what) {
     return name;
 }
 
+// Exported for tests. Returns the { text, values } passed to client.query().
+export function buildQuery(cfg, lookbackDays, now = Date.now()) {
+    if (cfg.query) {
+        return { text: cfg.query, values: [] };     // sanitized-view mode: vendor-authored SQL
+    }
+    const cols = [
+        `${ident(cfg.idField, 'id field')} AS raw_id`,
+        `${ident(cfg.outcomeField, 'outcome field')} AS outcome`,
+        cfg.outcomeDateField ? `${ident(cfg.outcomeDateField, 'outcome date field')} AS outcome_at` : `NULL AS outcome_at`,
+        cfg.planField ? `${ident(cfg.planField, 'plan field')} AS plan` : `NULL AS plan`,
+    ].join(', ');
+    let text = `SELECT ${cols} FROM ${ident(cfg.table, 'table')} `
+        + `WHERE ${ident(cfg.idField, 'id field')} IS NOT NULL `
+        + `AND ${ident(cfg.outcomeField, 'outcome field')} IS NOT NULL`;
+    let values = [];
+    if (cfg.modifiedField) {
+        text += ` AND ${ident(cfg.modifiedField, 'modified field')} >= $1`;
+        values = [new Date(now - lookbackDays * 86_400_000).toISOString()];
+    }
+    return { text, values };
+}
+
+// A DATE column comes back as a Date pinned to midnight UTC — keep just the
+// date part so it isn't misread as a real timestamp. Anything with a time
+// component keeps its full ISO form.
+export function normalizeOutcomeAt(value) {
+    if (value instanceof Date) {
+        const iso = value.toISOString();
+        return iso.endsWith('T00:00:00.000Z') ? iso.slice(0, 10) : iso;
+    }
+    return value ?? null;
+}
+
 export async function* postgresRows(cfg, lookbackDays) {
     const { default: pg } = await import('pg');
     const client = new pg.Client({ connectionString: cfg.connectionString });
     await client.connect();
     try {
-        let text, values = [];
-        if (cfg.query) {
-            text = cfg.query;                       // sanitized-view mode: vendor-authored SQL
-        } else {
-            const cols = [
-                `${ident(cfg.idField, 'id field')} AS raw_id`,
-                `${ident(cfg.outcomeField, 'outcome field')} AS outcome`,
-                cfg.outcomeDateField ? `${ident(cfg.outcomeDateField, 'outcome date field')} AS outcome_at` : `NULL AS outcome_at`,
-                cfg.planField ? `${ident(cfg.planField, 'plan field')} AS plan` : `NULL AS plan`,
-            ].join(', ');
-            text = `SELECT ${cols} FROM ${ident(cfg.table, 'table')} `
-                + `WHERE ${ident(cfg.idField, 'id field')} IS NOT NULL `
-                + `AND ${ident(cfg.outcomeField, 'outcome field')} IS NOT NULL`;
-            if (cfg.modifiedField) {
-                text += ` AND ${ident(cfg.modifiedField, 'modified field')} >= $1`;
-                values = [new Date(Date.now() - lookbackDays * 86_400_000).toISOString()];
-            }
-        }
-        const res = await client.query({ text, values });
+        const res = await client.query(buildQuery(cfg, lookbackDays));
         for (const r of res.rows) {
             yield {
                 rawId: r.raw_id,
                 outcome: r.outcome,
-                outcomeAt: r.outcome_at instanceof Date ? r.outcome_at.toISOString().slice(0, 10) : (r.outcome_at ?? null),
+                outcomeAt: normalizeOutcomeAt(r.outcome_at),
                 plan: r.plan ?? null,
             };
         }
