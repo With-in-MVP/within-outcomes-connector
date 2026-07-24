@@ -51,6 +51,33 @@ export function conversionTimestamps(outcomeAt) {
     };
 }
 
+// Deterministic per-subject-per-day key: the same source row always produces
+// the same key, so re-pushes across runs dedupe server-side instead of
+// duplicating. Matches the 64-hex contract of /api/crm/outcomes.
+export function outcomeIdempotencyKey(subject, outcomeType, occurredAt) {
+    return createHash('sha256')
+        .update(`${subject}:${outcomeType}:${String(occurredAt).slice(0, 10)}`)
+        .digest('hex');
+}
+
+// One item in the outcomes batch for /api/crm/outcomes (Jamie's CRM
+// outcomes API). occurred_at must be a real timestamp; date-only values get
+// midnight UTC via conversionTimestamps, and rows with no date fall back to
+// the run time (passed in — lib stays clock-free).
+export function buildOutcomeItem(evt, config, fallbackOccurredAt) {
+    const { converted_at } = conversionTimestamps(evt.outcome_at);
+    const occurredAt = converted_at ?? fallbackOccurredAt;
+    return {
+        idempotency_key: outcomeIdempotencyKey(evt.subject, evt.kind, occurredAt),
+        subject: evt.subject,
+        outcome_type: evt.kind,
+        occurred_at: occurredAt,
+        source_mapping: config.outcomeSourceMapping,
+        plan: evt.plan ? { id: evt.plan, name: evt.plan } : undefined,
+        metadata: { source: 'within-privacy-bridge', outcome: evt.outcome },
+    };
+}
+
 export function buildConversionPayload(evt, config) {
     const { converted_at, conversion_utc_date } = conversionTimestamps(evt.outcome_at);
     return {

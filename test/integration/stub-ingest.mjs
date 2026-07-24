@@ -4,7 +4,7 @@
 import { createServer } from 'node:http';
 
 const seen = new Set();
-export const received = { conversions: [], events: [] };
+export const received = { conversions: [], events: [], outcomes: [] };
 
 export function startStubIngest(port = 0) {
     const server = createServer((req, res) => {
@@ -19,6 +19,15 @@ export function startStubIngest(port = 0) {
                 seen.add(key);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ inserted, status: 'subscriber' }));
+            } else if (req.url === '/api/crm/outcomes') {
+                received.outcomes.push(body);
+                const results = (body.outcomes ?? []).map((o) => {
+                    const inserted = !seen.has(o.idempotency_key);
+                    seen.add(o.idempotency_key);
+                    return { idempotency_key: o.idempotency_key, inserted };
+                });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, results }));
             } else if (req.url === '/api/sdk/events') {
                 received.events.push(body);
                 res.writeHead(200, { 'Content-Type': 'application/json' });

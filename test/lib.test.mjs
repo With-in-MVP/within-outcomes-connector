@@ -104,3 +104,32 @@ test('HMAC mode produces a different, stable subject', () => {
     assert.notEqual(plain, hmac);
     assert.equal(hmac, hashSubject('acme', 'user-1', 'secret'));
 });
+
+test('outcomeIdempotencyKey is deterministic and per-day', async () => {
+    const { outcomeIdempotencyKey } = await import('../src/lib.mjs');
+    const a = outcomeIdempotencyKey('ab'.repeat(32), 'churn', '2026-07-24');
+    assert.match(a, /^[0-9a-f]{64}$/);
+    assert.equal(a, outcomeIdempotencyKey('ab'.repeat(32), 'churn', '2026-07-24T15:30:00.000Z'));
+    assert.notEqual(a, outcomeIdempotencyKey('ab'.repeat(32), 'churn', '2026-07-25'));
+    assert.notEqual(a, outcomeIdempotencyKey('ab'.repeat(32), 'conversion', '2026-07-24'));
+});
+
+test('buildOutcomeItem matches the /api/crm/outcomes contract', async () => {
+    const { buildOutcomeItem } = await import('../src/lib.mjs');
+    const cfg = { ...CONFIG, outcomeSourceMapping: 'postgres.subscriptions.status' };
+    const evt = toOutcomeEvent(
+        { rawId: 'gone@acme.com', outcome: 'churned', outcomeAt: '2026-07-24', plan: 'starter' },
+        cfg,
+    );
+    const item = buildOutcomeItem(evt, cfg, '2026-07-24T09:00:00.000Z');
+    assert.match(item.idempotency_key, /^[0-9a-f]{64}$/);
+    assert.match(item.subject, /^[0-9a-f]{64}$/);
+    assert.equal(item.outcome_type, 'churn');
+    assert.equal(item.occurred_at, '2026-07-24T00:00:00.000Z');
+    assert.equal(item.source_mapping, 'postgres.subscriptions.status');
+    assert.deepEqual(item.plan, { id: 'starter', name: 'starter' });
+    assert.ok(!JSON.stringify(item).includes('gone@acme.com'));
+    // no outcome date -> falls back to the run timestamp
+    const noDate = toOutcomeEvent({ rawId: 'x@y.co', outcome: 'churned' }, cfg);
+    assert.equal(buildOutcomeItem(noDate, cfg, '2026-07-24T09:00:00.000Z').occurred_at, '2026-07-24T09:00:00.000Z');
+});

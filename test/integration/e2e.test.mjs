@@ -61,15 +61,25 @@ test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t
 
     await t.test('field-mapping mode pushes exactly the joinable outcomes', async () => {
         received.conversions.length = 0;
+        received.outcomes.length = 0;
         const { stdout } = await runBridge(FIELD_ENV, port);
         const stats = JSON.parse(stdout.match(/bridge run complete \[postgres\]: (\{.*\})/)[1]);
 
         // seed: 6 rows — 1 outside the window, 1 null-id filtered in SQL →
-        // 4 scanned: 2 conversions, 1 churn skipped, 1 unmapped skipped
+        // 4 scanned: 2 conversions, 1 churn pushed, 1 unmapped skipped
         assert.equal(stats.scanned, 4);
         assert.equal(stats.pushed, 2);
-        assert.equal(stats.churn_skipped, 1);
+        assert.equal(stats.churn_pushed, 1);
+        assert.equal(stats.churn_skipped, 0);
         assert.equal(stats.unmapped_skipped, 1);
+
+        // the churned row went through /api/crm/outcomes with the full contract
+        const outcomeItems = received.outcomes.flatMap((b) => b.outcomes);
+        assert.equal(outcomeItems.length, 1);
+        assert.equal(outcomeItems[0].outcome_type, 'churn');
+        assert.match(outcomeItems[0].idempotency_key, /^[0-9a-f]{64}$/);
+        assert.equal(outcomeItems[0].subject, sdkSubject('acme', 'gone@acme.com'));
+        assert.equal(received.outcomes[0].source, 'postgres');
         assert.equal(stats.failed, 0);
 
         const subjects = received.conversions.map((c) => c.subject).sort();
@@ -88,6 +98,8 @@ test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t
         const stats = JSON.parse(stdout.match(/bridge run complete \[postgres\]: (\{.*\})/)[1]);
         assert.equal(stats.pushed, 0);
         assert.equal(stats.deduped, 2);
+        assert.equal(stats.churn_pushed, 0);
+        assert.equal(stats.churn_deduped, 1);
         assert.equal(stats.failed, 0);
     });
 

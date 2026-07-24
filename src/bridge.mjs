@@ -19,7 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { salesforceConfig, salesforceRows } from './adapters/salesforce.mjs';
 import { postgresConfig, postgresRows } from './adapters/postgres.mjs';
-import { ID_NORMALIZE_MODES, toOutcomeEvent, buildConversionPayload } from './lib.mjs';
+import { ID_NORMALIZE_MODES, toOutcomeEvent, buildConversionPayload, buildOutcomeItem } from './lib.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -45,6 +45,12 @@ const CONFIG = {
     // before the SDK hashes it: 'lowercase' (default; emails) or 'none'
     // (case-sensitive account IDs — the SDK itself never lowercases).
     idNormalize: env('ID_NORMALIZE', 'lowercase').toLowerCase(),
+    // Churn ingestion via the CRM outcomes API. source identifies the system
+    // of record in the request envelope; source_mapping names where in it the
+    // outcome lives (letters, digits, dots, underscores, dashes).
+    outcomesPath: env('OUTCOMES_PATH', '/api/crm/outcomes'),
+    outcomeSource: env('OUTCOME_SOURCE', CRM),
+    outcomeSourceMapping: env('OUTCOME_SOURCE_MAPPING', CRM),
 };
 if (!ID_NORMALIZE_MODES.includes(CONFIG.idNormalize)) {
     throw new Error(`invalid ID_NORMALIZE: ${CONFIG.idNormalize} (supported: ${ID_NORMALIZE_MODES.join(', ')})`);
@@ -77,6 +83,49 @@ async function pushConversion(evt) {
     return { ok: res.ok, status: res.status, inserted: body.inserted ?? null, body };
 }
 
+// Push queued churn (and other non-conversion) outcomes in batches of ≤100
+// through the CRM outcomes API. Deduplication is server-side via the
+// deterministic idempotency_key on each item.
+async function pushOutcomeBatch(items) {
+    const res = await fetch(`${CONFIG.withinBaseUrl}${CONFIG.outcomesPath}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ingestKey}` },
+        body: JSON.stringify({ vendor_slug: CONFIG.vendorSlug, source: CONFIG.outcomeSource, outcomes: items }),
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, results: Array.isArray(body.results) ? body.results : [], body };
+}
+
+async function flushOutcomes(queue, stats) {
+    for (let i = 0; i < queue.length; i += 100) {
+        const batch = queue.slice(i, i + 100);
+        const result = await pushOutcomeBatch(batch);
+        if (result.status === 404) {
+            // Outcomes endpoint not deployed on this ingest host yet — don't
+            // fail the whole run; conversions still flowed.
+            stats.churn_skipped += queue.length - i;
+            console.error(`outcomes endpoint ${CONFIG.outcomesPath} not available (404) — `
+                + `${queue.length - i} churn outcome(s) skipped; they will be retried next run`);
+            return;
+        }
+        if (!result.ok) {
+            stats.churn_failed += batch.length;
+            console.error(`FAILED outcomes batch | HTTP ${result.status} | ${JSON.stringify(result.body).slice(0, 200)}`);
+            continue;
+        }
+        for (const r of result.results) {
+            if (r?.status === 'rejected') {
+                stats.churn_failed++;
+                console.error(`REJECTED outcome ${String(r.idempotency_key).slice(0, 12)}… | ${r.error}`);
+            } else if (r?.inserted === false) {
+                stats.churn_deduped++;
+            } else {
+                stats.churn_pushed++;
+            }
+        }
+    }
+}
+
 async function postHeartbeat(stats) {
     try {
         await fetch(`${CONFIG.withinBaseUrl}/api/sdk/events`, {
@@ -101,15 +150,25 @@ async function postHeartbeat(stats) {
 
 // ── main ──────────────────────────────────────────────────────────────────
 
-const stats = { scanned: 0, pushed: 0, deduped: 0, failed: 0, churn_skipped: 0, unmapped_skipped: 0 };
+const stats = {
+    scanned: 0, pushed: 0, deduped: 0, failed: 0,
+    churn_pushed: 0, churn_deduped: 0, churn_failed: 0, churn_skipped: 0,
+    unmapped_skipped: 0,
+};
 const startedAt = Date.now();
+const runStartedAt = new Date().toISOString();
+const churnQueue = [];
 
 for await (const row of ADAPTERS[CRM]()) {
     stats.scanned++;
     if (row.rawId == null || row.rawId === '') { stats.unmapped_skipped++; continue; }
     const evt = toOutcomeEvent(row, CONFIG);
 
-    if (evt.kind === 'churn') { stats.churn_skipped++; continue; }     // pending churn ingestion
+    if (evt.kind === 'churn') {
+        if (DRY_RUN) { stats.churn_pushed++; console.log(`[dry-run] churn ${evt.subject.slice(0, 12)}… (${evt.outcome})`); continue; }
+        churnQueue.push(buildOutcomeItem(evt, CONFIG, runStartedAt));
+        continue;
+    }
     if (evt.kind !== 'conversion') { stats.unmapped_skipped++; continue; }
 
     if (DRY_RUN) { stats.pushed++; console.log(`[dry-run] conversion ${evt.subject.slice(0, 12)}… (${evt.outcome})`); continue; }
@@ -124,7 +183,9 @@ for await (const row of ADAPTERS[CRM]()) {
     }
 }
 
+if (churnQueue.length > 0) await flushOutcomes(churnQueue, stats);
+
 stats.duration_ms = Date.now() - startedAt;
 console.log(`bridge run complete [${CRM}]: ${JSON.stringify(stats)}`);
 if (!DRY_RUN) await postHeartbeat(stats);
-if (stats.failed > 0) process.exit(1);
+if (stats.failed > 0 || stats.churn_failed > 0) process.exit(1);
