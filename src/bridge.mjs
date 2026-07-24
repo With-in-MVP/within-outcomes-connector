@@ -16,9 +16,12 @@
 // Usage:  node src/bridge.mjs [--dry-run]
 // Config: environment variables — see config.example.env
 
+import { readFileSync } from 'node:fs';
 import { salesforceConfig, salesforceRows } from './adapters/salesforce.mjs';
 import { postgresConfig, postgresRows } from './adapters/postgres.mjs';
 import { ID_NORMALIZE_MODES, toOutcomeEvent, buildConversionPayload } from './lib.mjs';
+
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 // ── configuration ─────────────────────────────────────────────────────────
 
@@ -81,7 +84,7 @@ async function postHeartbeat(stats) {
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ingestKey}` },
             body: JSON.stringify({
                 vendor_slug: CONFIG.vendorSlug,
-                sdk_version: 'privacy-bridge/1.1.0',
+                sdk_version: `privacy-bridge/${VERSION}`,
                 events: [{
                     eventType: 'within:custom',
                     resourceName: 'privacy_bridge_heartbeat',
