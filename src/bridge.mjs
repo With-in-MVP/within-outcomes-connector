@@ -35,7 +35,9 @@ const CRM = (process.env.CRM ?? 'salesforce').toLowerCase();
 
 const CONFIG = {
     outcomeMap: JSON.parse(env('OUTCOME_MAP', '{"converted":"conversion","upgraded":"conversion","churned":"churn"}')),
-    withinBaseUrl: env('WITHIN_INGEST_BASE_URL').replace(/\/+$/, ''),
+    // Same default the SDK bakes in; override only for testing or a
+    // dedicated/on-prem Within deployment. Empty counts as unset.
+    withinBaseUrl: (process.env.WITHIN_INGEST_BASE_URL || 'https://api.getwith.in').replace(/\/+$/, ''),
     vendorSlug: env('WITHIN_VENDOR_SLUG'),
     ingestKey: env('WITHIN_INGEST_KEY'),
     // v2 — vendor-held HMAC secret; requires matching SDK support. Leave unset.
