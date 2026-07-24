@@ -11,6 +11,9 @@
 //   2. Custom SQL: PG_QUERY, which must return columns
 //      raw_id, outcome, outcome_at, plan — the "sanitized view" pattern.
 
+import { readFileSync, readdirSync } from 'node:fs';
+import { rootCertificates } from 'node:tls';
+
 export function postgresConfig(env) {
     const req = (name) => {
         const v = env[name];
@@ -19,6 +22,9 @@ export function postgresConfig(env) {
     };
     const cfg = {
         connectionString: req('PG_CONNECTION_STRING'),
+        // Escape hatch for providers whose CA isn't bundled in certs/ —
+        // the CA certificate PEM contents, pasted directly into the env var.
+        caCert: env.PG_CA_CERT || null,
         query: env.PG_QUERY || null,
         table: env.PG_TABLE || null,
         idField: env.PG_ID_FIELD || null,
@@ -76,10 +82,67 @@ export function normalizeOutcomeAt(value) {
     return value ?? null;
 }
 
+// Managed Postgres providers (AWS RDS, Supabase, ...) sign their server certs
+// with private CAs that are not in Node's default trust store, so strict TLS
+// verification fails out of the box. We bundle those providers' published CA
+// roots (certs/ in the repo/image) and trust them IN ADDITION to the default
+// store — vendors on those providers get verified TLS with zero config, and
+// anyone else can supply their CA via PG_CA_CERT.
+function bundledCas() {
+    try {
+        const dir = new URL('../../certs/', import.meta.url);
+        return readdirSync(dir)
+            .filter((f) => /\.(pem|crt)$/.test(f))
+            .map((f) => readFileSync(new URL(f, dir), 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+// Exported for tests. Returns { connectionString, ssl } for pg.Client.
+// ssl is null for local/unencrypted databases (the string speaks for itself).
+// When we do supply an ssl object, sslmode is STRIPPED from the string —
+// pg's connection-string parser otherwise overrides the explicit ssl option
+// with its own (default-trust-store) interpretation of sslmode.
+export function buildSslConfig(connectionString, caCert = null) {
+    const mode = /[?&]sslmode=([^&]+)/.exec(connectionString)?.[1] ?? null;
+    if (mode === null || mode === 'disable') return { connectionString, ssl: null };
+    const stripped = connectionString
+        .replace(/([?&])sslmode=[^&]*/, '$1')
+        .replace(/\?&/, '?')
+        .replace(/&&/, '&')
+        .replace(/[?&]$/, '');
+    const ssl = mode === 'no-verify'
+        ? { rejectUnauthorized: false }
+        : { ca: [...rootCertificates, ...bundledCas(), ...(caCert ? [caCert] : [])] };
+    return { connectionString: stripped, ssl };
+}
+
+const TLS_ERROR_CODES = new Set([
+    'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
 export async function* postgresRows(cfg, lookbackDays) {
     const { default: pg } = await import('pg');
-    const client = new pg.Client({ connectionString: cfg.connectionString });
-    await client.connect();
+    const { connectionString, ssl } = buildSslConfig(cfg.connectionString, cfg.caCert);
+    const client = new pg.Client({ connectionString, ...(ssl ? { ssl } : {}) });
+    try {
+        await client.connect();
+    } catch (err) {
+        if (TLS_ERROR_CODES.has(err?.code)) {
+            throw new Error(
+                `TLS certificate verification failed (${err.code}). Your database provider `
+                + `likely uses a private CA. AWS RDS and Supabase CAs are bundled and should `
+                + `work automatically — for other providers, download the CA certificate from `
+                + `your provider and set PG_CA_CERT to its PEM contents. For a NON-PRODUCTION `
+                + `smoke test only, you can set sslmode=no-verify in PG_CONNECTION_STRING.`,
+                { cause: err },
+            );
+        }
+        throw err;
+    }
     try {
         const res = await client.query(buildQuery(cfg, lookbackDays));
         for (const r of res.rows) {

@@ -74,3 +74,41 @@ test('normalizeOutcomeAt keeps DATE columns date-only and timestamps full', () =
     assert.equal(normalizeOutcomeAt(null), null);
     assert.equal(normalizeOutcomeAt(undefined), null);
 });
+
+test('buildSslConfig maps sslmode to pg ssl options', async () => {
+    const { buildSslConfig } = await import('../src/adapters/postgres.mjs');
+    const base = 'postgresql://u:p@host:5432/db';
+    // no sslmode / disable: leave the connection string in charge
+    assert.deepEqual(buildSslConfig(base), { connectionString: base, ssl: null });
+    assert.equal(buildSslConfig(`${base}?sslmode=disable`).ssl, null);
+    // no-verify: encrypted, unverified (smoke tests only)
+    const nv = buildSslConfig(`${base}?sslmode=no-verify`);
+    assert.deepEqual(nv.ssl, { rejectUnauthorized: false });
+    // verifying modes: default store + bundled provider CAs
+    const { connectionString, ssl } = buildSslConfig(`${base}?sslmode=require`);
+    assert.ok(Array.isArray(ssl.ca) && ssl.ca.length > 0);
+    assert.ok(ssl.ca.join('\n').includes('BEGIN CERTIFICATE'));
+    // sslmode must be STRIPPED when we supply ssl ourselves — pg's parser
+    // otherwise overrides the explicit ssl option
+    assert.ok(!connectionString.includes('sslmode'));
+    assert.ok(!nv.connectionString.includes('sslmode'));
+    assert.ok(!connectionString.endsWith('?') && !connectionString.endsWith('&'));
+    // other query params survive the strip
+    const multi = buildSslConfig(`${base}?application_name=bridge&sslmode=require&connect_timeout=5`);
+    assert.ok(multi.connectionString.includes('application_name=bridge'));
+    assert.ok(multi.connectionString.includes('connect_timeout=5'));
+    assert.ok(!multi.connectionString.includes('sslmode'));
+    // PG_CA_CERT is appended, not replacing the trust set
+    const custom = buildSslConfig(`${base}?sslmode=require`, 'FAKE-PEM');
+    assert.equal(custom.ssl.ca[custom.ssl.ca.length - 1], 'FAKE-PEM');
+    assert.equal(custom.ssl.ca.length, ssl.ca.length + 1);
+});
+
+test('bundled provider CAs are present in certs/', async () => {
+    const { buildSslConfig } = await import('../src/adapters/postgres.mjs');
+    const { rootCertificates } = await import('node:tls');
+    const { ssl } = buildSslConfig('postgresql://u:p@host:5432/db?sslmode=require');
+    // more CAs than Node's default store alone -> certs/ was found and loaded
+    assert.ok(ssl.ca.length > rootCertificates.length, 'certs/ bundle missing');
+    assert.ok(ssl.ca.some((c) => c.includes('BEGIN CERTIFICATE')));
+});
