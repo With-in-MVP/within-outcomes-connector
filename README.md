@@ -42,7 +42,7 @@ read-only database user.
 1. **Register an API app in your CRM.** Salesforce: a Connected App (or External
    Client App) with OAuth + Client Credentials flow, run-as a read-only integration
    user. Collect the Consumer Key/Secret.
-2. **Fill in the config.** Copy `config.example.env` → `bridge.env`. The critical
+2. **Fill in the config.** Copy `.env.example` → `bridge.env`. The critical
    value is `SF_ID_FIELD`: it must hold the **same identifier your `identify()`
    callback returns** on your MCP server (email, account ID…). Same identifier on
    both sides is what makes joins work.

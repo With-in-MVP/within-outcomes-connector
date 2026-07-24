@@ -14,7 +14,7 @@
 // Within's API deduplicates per subject per day. No local state, no database.
 //
 // Usage:  node src/bridge.mjs [--dry-run]
-// Config: environment variables — see config.example.env
+// Config: environment variables — see .env.example
 
 import { readFileSync } from 'node:fs';
 import { salesforceConfig, salesforceRows } from './adapters/salesforce.mjs';

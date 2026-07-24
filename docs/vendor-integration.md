@@ -125,7 +125,7 @@ SOQL uses API names, not labels — a field labeled "Outcome" may be
 `Outcome__c` or `Outcome1__c`. Find them: Object Manager → your object →
 Fields & Relationships (the "Field Name" column).
 
-**B3. Configure** — copy `config.example.env`, fill in:
+**B3. Configure** — copy `.env.example`, fill in:
 
 ```
 SF_INSTANCE_URL=https://your-org.my.salesforce.com
