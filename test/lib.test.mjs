@@ -94,7 +94,7 @@ test('buildConversionPayload shape', () => {
     assert.equal(payload.converted_at, '2026-07-23T00:00:00.000Z');
     assert.equal(payload.conversion_utc_date, '2026-07-23');
     assert.deepEqual(payload.plan, { id: 'pro', name: 'pro' });
-    assert.deepEqual(payload.metadata, { source: 'within-privacy-bridge', outcome: 'converted' });
+    assert.deepEqual(payload.metadata, { source: 'within-outcomes-connector', outcome: 'converted' });
     assert.ok(!JSON.stringify(payload).includes('a@b.co'));
 });
 

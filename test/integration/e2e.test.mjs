@@ -51,7 +51,7 @@ const FIELD_ENV = {
     PG_MODIFIED_FIELD: 'updated_at',
 };
 
-test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t) => {
+test('outcomes connector end-to-end against Postgres', { timeout: 60_000 }, async (t) => {
     if (!(await pgUp())) {
         t.skip(`fixture Postgres not reachable at ${PG_URL} — run npm run test:integration`);
         return;
@@ -63,7 +63,7 @@ test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t
         received.conversions.length = 0;
         received.outcomes.length = 0;
         const { stdout } = await runBridge(FIELD_ENV, port);
-        const stats = JSON.parse(stdout.match(/bridge run complete \[postgres\]: (\{.*\})/)[1]);
+        const stats = JSON.parse(stdout.match(/connector run complete \[postgres\]: (\{.*\})/)[1]);
 
         // seed: 6 rows — 1 outside the window, 1 null-id filtered in SQL →
         // 4 scanned: 2 conversions, 1 churn pushed, 1 unmapped skipped
@@ -95,7 +95,7 @@ test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t
 
     await t.test('re-run is idempotent: server dedup turns pushes into deduped', async () => {
         const { stdout } = await runBridge(FIELD_ENV, port);
-        const stats = JSON.parse(stdout.match(/bridge run complete \[postgres\]: (\{.*\})/)[1]);
+        const stats = JSON.parse(stdout.match(/connector run complete \[postgres\]: (\{.*\})/)[1]);
         assert.equal(stats.pushed, 0);
         assert.equal(stats.deduped, 2);
         assert.equal(stats.churn_pushed, 0);
@@ -108,7 +108,7 @@ test('privacy bridge end-to-end against Postgres', { timeout: 60_000 }, async (t
         const { stdout } = await runBridge({
             PG_QUERY: 'SELECT raw_id, outcome, outcome_at, plan FROM v_outcomes',
         }, port);
-        const stats = JSON.parse(stdout.match(/bridge run complete \[postgres\]: (\{.*\})/)[1]);
+        const stats = JSON.parse(stdout.match(/connector run complete \[postgres\]: (\{.*\})/)[1]);
         assert.equal(stats.scanned, 5);
         assert.equal(stats.deduped + stats.pushed, 2);
         assert.equal(stats.failed, 0);

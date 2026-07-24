@@ -1,4 +1,4 @@
-# Within Privacy Bridge
+# Within Outcomes Connector
 
 A small, open-source, zero-dependency connector that runs **in your cloud environment**,
 reads outcome records (conversions, upgrades) from your CRM, pseudonymizes the user
@@ -13,7 +13,7 @@ YOUR CLOUD ENVIRONMENT                                WITHIN
 │  CRM (Salesforce)                           │
 │    │  raw contacts + outcomes               │
 │    ▼                                        │
-│  Privacy Bridge (this container)            │
+│  Outcomes Connector (this container)            │
 │    normalize identifier                     │
 │    hash it (SHA-256, vendor-scoped)         │──────▶  ingestion API
 │    discard all raw fields                   │  hashes  (pseudonymous
@@ -42,14 +42,14 @@ read-only database user.
 1. **Register an API app in your CRM.** Salesforce: a Connected App (or External
    Client App) with OAuth + Client Credentials flow, run-as a read-only integration
    user. Collect the Consumer Key/Secret.
-2. **Fill in the config.** Copy `.env.example` → `bridge.env`. The critical
+2. **Fill in the config.** Copy `.env.example` → `connector.env`. The critical
    value is `SF_ID_FIELD`: it must hold the **same identifier your `identify()`
    callback returns** on your MCP server (email, account ID…). Same identifier on
    both sides is what makes joins work.
 3. **Schedule the container** in your cloud (daily recommended):
    - **AWS**: EventBridge Scheduler → ECS Fargate task or Lambda (container image)
    - **GCP**: Cloud Run Job + Cloud Scheduler
-   - **Anywhere**: `cron` + `docker run --env-file bridge.env ghcr.io/with-in/privacy-bridge@sha256:<pinned digest>`
+   - **Anywhere**: `cron` + `docker run --env-file connector.env ghcr.io/with-in/outcomes-connector@sha256:<pinned digest>`
 
 The bridge is **stateless and idempotent**: each run re-reads a trailing window
 (`LOOKBACK_DAYS`) of recently modified records and re-pushes; Within deduplicates per
@@ -65,7 +65,7 @@ both you and Within can see the bridge is alive.
   and adapters. One third-party dependency total (`pg`, used only by the
   postgres adapter); the Salesforce path is Node built-ins only.
 - **Verify it**: every release is signed (Sigstore keyless). Verify with
-  `cosign verify ghcr.io/with-in/privacy-bridge@<digest>`.
+  `cosign verify ghcr.io/with-in/outcomes-connector@<digest>`.
 - **Pin it**: deploy by digest (`@sha256:…`), not by tag — the image you audited is
   the image that runs, permanently, until you choose to upgrade.
 - **Cage it**: the bridge only needs outbound HTTPS to your CRM host and Within's

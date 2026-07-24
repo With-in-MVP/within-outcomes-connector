@@ -1,4 +1,4 @@
-// Pure transform logic for the privacy bridge — no I/O, no env access.
+// Pure transform logic for the outcomes connector — no I/O, no env access.
 // Extracted from bridge.mjs so the privacy boundary is unit-testable.
 
 import { createHash, createHmac } from 'node:crypto';
@@ -74,7 +74,7 @@ export function buildOutcomeItem(evt, config, fallbackOccurredAt) {
         occurred_at: occurredAt,
         source_mapping: config.outcomeSourceMapping,
         plan: evt.plan ? { id: evt.plan, name: evt.plan } : undefined,
-        metadata: { source: 'within-privacy-bridge', outcome: evt.outcome },
+        metadata: { source: 'within-outcomes-connector', outcome: evt.outcome },
     };
 }
 
@@ -86,6 +86,6 @@ export function buildConversionPayload(evt, config) {
         converted_at,
         conversion_utc_date,
         plan: evt.plan ? { id: evt.plan, name: evt.plan } : undefined,
-        metadata: { source: 'within-privacy-bridge', outcome: evt.outcome },
+        metadata: { source: 'within-outcomes-connector', outcome: evt.outcome },
     };
 }

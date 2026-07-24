@@ -106,7 +106,7 @@ await reportConversion(
 The SDK pseudonymizes the userId internally (same hash as usage events) before
 anything is sent. Real-time, no infrastructure. *(Requires within-sdk ≥ 1.0.3.)*
 
-### Door B — your outcomes live in a CRM (Salesforce): the Privacy Bridge
+### Door B — your outcomes live in a CRM (Salesforce): the Outcomes Connector
 
 A small open-source container you run **in your own cloud**. It reads your CRM,
 pseudonymizes identifiers in-process, discards raw fields, and pushes outcome
@@ -150,7 +150,7 @@ bulk .env pasting can mangle JSON values.)
 
 Image (deploy by digest to pin the version you've reviewed):
 ```
-ghcr.io/with-in-mvp/within-privacy-bridge@sha256:<digest from release notes>
+ghcr.io/with-in-mvp/within-outcomes-connector@sha256:<digest from release notes>
 ```
 
 The bridge is stateless and idempotent — runs can overlap or repeat harmlessly
@@ -185,7 +185,7 @@ the bridge's SQL mode against it *(roadmap — ask us for status)*.
 - [ ] Choose the canonical identifier (section 0) — same field in `identify()` and CRM
 - [ ] `npm install within-sdk`; add `track()` + `identify()` to your MCP server
 - [ ] Set `WITHIN_SDK_API_KEY` / ingest URL (from Within)
-- [ ] Pick an outcome door: webhook helper (A) or Privacy Bridge (B)
+- [ ] Pick an outcome door: webhook helper (A) or Outcomes Connector (B)
 - [ ] Door B: CRM API app → field API names → config → schedule container
 - [ ] Run the three verification steps
 - [ ] Production hygiene: read-only CRM integration user; pin the bridge digest;

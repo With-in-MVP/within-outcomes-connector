@@ -1,4 +1,4 @@
-// Within Privacy Bridge
+// Within Outcomes Connector
 //
 // Runs inside the VENDOR's environment. Pulls outcome records from the vendor's
 // CRM or database, pseudonymizes the user identifier locally, discards all raw
@@ -135,10 +135,10 @@ async function postHeartbeat(stats) {
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${CONFIG.ingestKey}` },
             body: JSON.stringify({
                 vendor_slug: CONFIG.vendorSlug,
-                sdk_version: `privacy-bridge/${VERSION}`,
+                sdk_version: `outcomes-connector/${VERSION}`,
                 events: [{
                     eventType: 'within:custom',
-                    resourceName: 'privacy_bridge_heartbeat',
+                    resourceName: 'outcomes_connector_heartbeat',
                     sessionId: `ses_bridge_${new Date().toISOString().slice(0, 10)}`,
                     timestamp: new Date().toISOString(),
                     properties: { adapter: CRM, ...stats },
@@ -188,6 +188,6 @@ for await (const row of ADAPTERS[CRM]()) {
 if (churnQueue.length > 0) await flushOutcomes(churnQueue, stats);
 
 stats.duration_ms = Date.now() - startedAt;
-console.log(`bridge run complete [${CRM}]: ${JSON.stringify(stats)}`);
+console.log(`connector run complete [${CRM}]: ${JSON.stringify(stats)}`);
 if (!DRY_RUN) await postHeartbeat(stats);
 if (stats.failed > 0 || stats.churn_failed > 0) process.exit(1);
